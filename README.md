@@ -212,3 +212,9 @@ else:
                 )
 
             st.success("Mapa de taxa variável gerado!")
+            
+start.sh
+            #!/bin/bash
+
+            pip install -r requirements.txt
+            streamlit run app.py --server.port             $PORT --server.address 0.0.0.0
