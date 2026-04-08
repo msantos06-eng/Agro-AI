@@ -30,7 +30,6 @@ Contribuições são sempre bem-vindas! Se você deseja contribuir com este proj
 ## 📜 Licença
 Este projeto está licenciado sob a [MIT License](LICENSE).
 
----
 import streamlit as st
 import numpy as np
 import rasterio
@@ -42,22 +41,24 @@ import geopandas as gpd
 from rasterio.features import shapes
 from auth import criar_tabelas, cadastrar, login
 
+# ---------------- CONFIG ----------------
 st.set_page_config(page_title="Agro AI Pro", layout="wide")
 
-criar_tabelas()
-
+# ---------------- BANCO ----------------
 def conectar():
     return sqlite3.connect("database.db")
 
+criar_tabelas()
+
+# ---------------- SESSION ----------------
 if "logado" not in st.session_state:
     st.session_state.logado = False
 
+# ---------------- LOGIN ----------------
 if not st.session_state.logado:
-
-    st.title("🔐 Agro AI Pro")
+    st.title("🔐 Agro AI Pro - Login")
 
     menu = st.radio("Escolha:", ["Login", "Cadastrar"])
-
     user = st.text_input("Usuário")
     senha = st.text_input("Senha", type="password")
 
@@ -75,10 +76,11 @@ if not st.session_state.logado:
             else:
                 st.error("Login inválido")
 
+# ---------------- APP ----------------
 else:
-
     usuario = st.session_state.usuario
 
+    st.title("🌱 Agro AI Pro")
     st.sidebar.write(f"👤 {usuario}")
 
     if st.sidebar.button("Sair"):
@@ -88,42 +90,53 @@ else:
     conn = conectar()
     c = conn.cursor()
 
+    # -------- FAZENDA --------
     st.sidebar.subheader("🏡 Fazendas")
 
     nova_fazenda = st.sidebar.text_input("Nova fazenda")
-
     if st.sidebar.button("Cadastrar fazenda"):
-        c.execute("INSERT INTO fazendas (usuario, nome) VALUES (?, ?)",
-                  (usuario, nova_fazenda))
-        conn.commit()
-        st.sidebar.success("Fazenda criada!")
+        if nova_fazenda:
+            c.execute("INSERT INTO fazendas (usuario, nome) VALUES (?, ?)",
+                      (usuario, nova_fazenda))
+            conn.commit()
+            st.sidebar.success("Fazenda criada!")
 
     c.execute("SELECT nome FROM fazendas WHERE usuario=?", (usuario,))
     fazendas = [f[0] for f in c.fetchall()]
 
+    if not fazendas:
+        st.warning("Cadastre uma fazenda para continuar.")
+        st.stop()
+
     fazenda_sel = st.sidebar.selectbox("Escolha a fazenda", fazendas)
 
+    # -------- TALHÃO --------
     st.sidebar.subheader("🌾 Talhões")
 
     novo_talhao = st.sidebar.text_input("Novo talhão")
-
     if st.sidebar.button("Cadastrar talhão"):
-        c.execute("INSERT INTO talhoes (fazenda, nome) VALUES (?, ?)",
-                  (fazenda_sel, novo_talhao))
-        conn.commit()
-        st.sidebar.success("Talhão criado!")
+        if novo_talhao:
+            c.execute("INSERT INTO talhoes (fazenda, nome) VALUES (?, ?)",
+                      (fazenda_sel, novo_talhao))
+            conn.commit()
+            st.sidebar.success("Talhão criado!")
 
     c.execute("SELECT nome FROM talhoes WHERE fazenda=?", (fazenda_sel,))
     talhoes = [t[0] for t in c.fetchall()]
+
+    if not talhoes:
+        st.warning("Cadastre um talhão para continuar.")
+        st.stop()
 
     talhao_sel = st.sidebar.selectbox("Escolha o talhão", talhoes)
 
     conn.close()
 
+    # -------- PASTA --------
     pasta = f"data/{usuario}/{fazenda_sel}/{talhao_sel}"
     os.makedirs(pasta, exist_ok=True)
 
-    st.title("🌱 Agro AI Pro")
+    st.subheader("📡 Processamento NDVI")
 
     nir_file = st.file_uploader("Banda NIR (.tif)", type=["tif"])
     red_file = st.file_uploader("Banda RED (.tif)", type=["tif"])
@@ -145,27 +158,31 @@ else:
         with rasterio.open(red_path) as red:
             red_band = red.read(1)
 
+        # -------- NDVI --------
         ndvi = (nir_band - red_band) / (nir_band + red_band + 0.001)
 
-        st.success("NDVI gerado!")
+        st.success("NDVI gerado com sucesso!")
 
         fig, ax = plt.subplots()
         cax = ax.imshow(ndvi, cmap='RdYlGn')
         fig.colorbar(cax)
         st.pyplot(fig)
 
+        # -------- ZONAS --------
         zonas = np.zeros_like(ndvi)
         zonas[ndvi < 0.3] = 1
         zonas[(ndvi >= 0.3) & (ndvi < 0.6)] = 2
         zonas[ndvi >= 0.6] = 3
 
+        # -------- SALVAR NDVI --------
         ndvi_path = f"{pasta}/ndvi.tif"
         meta.update(dtype=rasterio.float32)
 
         with rasterio.open(ndvi_path, 'w', **meta) as dst:
             dst.write(ndvi.astype(rasterio.float32), 1)
 
-        if st.button("🚜 Gerar mapa de taxa variável"):
+        # -------- MAPA TAXA --------
+        if st.button("📊 Gerar mapa de taxa variável"):
 
             results = (
                 {"properties": {"zona": int(v)}, "geometry": s}
@@ -188,69 +205,10 @@ else:
             gdf.to_file(shp_path)
 
             with open(shp_path, "rb") as f:
-                st.download_button("📥 Baixar Shapefile", f, "mapa.shp")
-import sqlite3
-import hashlib
+                st.download_button(
+                    "⬇️ Baixar Shapefile",
+                    f,
+                    file_name="mapa.shp"
+                )
 
-def conectar():
-    return sqlite3.connect("database.db")
-
-def criar_tabelas():
-    conn = conectar()
-    c = conn.cursor()
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS usuarios (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT,
-        password TEXT
-    )
-    """)
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS fazendas (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        usuario TEXT,
-        nome TEXT
-    )
-    """)
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS talhoes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        fazenda TEXT,
-        nome TEXT
-    )
-    """)
-
-    conn.commit()
-    conn.close()
-
-def hash_senha(senha):
-    return hashlib.sha256(senha.encode()).hexdigest()
-
-def cadastrar(username, senha):
-    conn = conectar()
-    c = conn.cursor()
-    c.execute("INSERT INTO usuarios (username, password) VALUES (?, ?)",
-              (username, hash_senha(senha)))
-    conn.commit()
-    conn.close()
-
-def login(username, senha):
-    conn = conectar()
-    c = conn.cursor()
-    c.execute("SELECT * FROM usuarios WHERE username=? AND password=?",
-              (username, hash_senha(senha)))
-    user = c.fetchone()
-    conn.close()
-    return user
-    streamlit
-numpy
-matplotlib
-rasterio
-geopandas
-shapely
-fiona
-pyproj
-streamlit run app.py --server.port $PORT --server.address 0.0.0.0
+            st.success("Mapa de taxa variável gerado!")
